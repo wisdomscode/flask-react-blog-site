@@ -1,0 +1,5 @@
+Flask==2.2.2
+flask-sqlalchemy==3.0.2
+flask-marshmallow
+Flask-Cors
+Flask-JWT-Extended

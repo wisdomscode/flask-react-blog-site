@@ -1,0 +1,53 @@
+import React from "react";
+
+function ExtComponet(props) {
+  const shoot = () => {
+    alert("What a shot, but Over the Bar");
+  };
+
+  const score = (g) => {
+    alert(g);
+  };
+  var userInfo = { name: "James Phil", age: 20, gender: "male" };
+
+  return (
+    <>
+      <h2>Hello I have {props.num} Users registered</h2>
+      <h3>whose name is {props.user}</h3>
+      <p>Name {props.userInfo.name}</p>
+      <p>Age {props.userInfo.age}</p>
+      <p>Gender {props.userInfo.gender}</p>
+      <br />
+      {/* function with no parameter */}
+      <button onClick={shoot}>Take a Shot</button>{" "}
+      {/* function with a parameter */}
+      <button onClick={() => score("A Goaaaal")}>Take a Shot</button>
+    </>
+  );
+}
+
+function Maincomponent() {
+  var authenticated = false;
+  var name = "John Deo";
+
+  var guest = <h1>Welcome Guest, You are not logged in</h1>;
+  var user = <h1>Welcome {name}</h1>;
+
+  // if (authenticated) {
+  //   guest = user;
+  // }
+
+  const x = 13;
+  return (
+    <div className="App">
+      <header className="App-header">My User</header>
+      <>{authenticated ? guest : user}</>
+
+      {x > 10 ? "x is large" : "x is small"}
+
+      <ExtComponet num="2" user={name} userInfo={userInfo} />
+    </div>
+  );
+}
+
+export default Maincomponent;

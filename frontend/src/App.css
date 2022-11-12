@@ -1,0 +1,37 @@
+
+
+.App-header {
+  background-color: #282c34;
+  min-height: 10vh;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(10px + 2vmin);
+  color: white;
+  padding: 0px 50px;
+}
+.nav_bar {
+  margin-right: 50px;
+}
+.nav_bar a {
+  color: #fff;
+  padding: 15px 30px;
+  text-decoration: none;
+}
+.form_box {
+  width: 50rem;
+  margin: auto;
+  border: 1px solid black;
+  padding: 40px;
+  border-radius: 10px;
+}
+.title_label {
+  width: 50rem;
+  margin: auto;
+  padding: 10px 20px;
+  margin-bottom: 10px;
+}
+.card {
+  margin-bottom: 20px;
+}
