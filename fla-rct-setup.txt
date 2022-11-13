@@ -1,0 +1,1262 @@
+FLASK AND REACT SETUP
+
+FLASK BACKEND
+
+create venv and install this packages
+Flask==2.2.2
+flask-sqlalchemy==3.0.2
+flask-marshmallow
+Flask-Cors
+Flask-JWT-Extended
+
+in app.py 
+from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+from flask_marshmallow import Marshmallow
+from flask_cors import CORS
+import datetime
+
+# authentication
+# create_access_token() to make JSON Web Tokens,
+from flask_jwt_extended import create_access_token, create_refresh_token
+# get_jwt_identity() to get the identity of a JWT in a protected route
+from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import jwt_required  # jwt_required() to protect routes,
+from flask_jwt_extended import JWTManager
+
+import uuid
+
+
+# create the extension
+db = SQLAlchemy()
+
+# create the app
+app = Flask(__name__)
+CORS(app)
+
+# Setup the Flask-JWT-Extended extension
+SECRET_KEY = uuid.uuid4().hex
+app.config['JWT_SECRET_KEY'] = SECRET_KEY
+jwt = JWTManager(app)
+
+
+# configure the SQLite database, relative to the app instance folder
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///project.db"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# initialize the app with the extension
+db.init_app(app)
+ma = Marshmallow(app)
+
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(50), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    date_created = db.Column(db.DateTime, default=datetime.datetime.now)
+
+
+# schema objects
+class UserSchema(ma.Schema):
+    class Meta:
+        fields = ('id', 'email', 'password', 'name', 'date_created')
+
+
+user_schema = UserSchema()
+users_schema = UserSchema(many=True)
+
+
+class Article(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100))
+    body = db.Column(db.Text())
+    author = db.Column(db.String(50))
+    date_posted = db.Column(db.DateTime, default=datetime.datetime.now)
+
+    def __init__(self, title, body, author):
+        self.title = title
+        self.body = body
+        self.author = author
+
+
+class ArticleSchema(ma.Schema):
+    class Meta:
+        fields = ('id', 'title', 'body', 'author', 'date_posted')
+
+
+article_schema = ArticleSchema()
+articles_schema = ArticleSchema(many=True)
+
+
+with app.app_context():
+    db.create_all()
+
+
+# auth routes
+
+# Create a route to authenticate your users and return JWTs. The
+# create_access_token() function is used to actually generate the JWT.
+@app.route('/api/login', methods=['POST'])
+def login():
+    email = request.json.get('email', None)
+    user_pass = request.json.get('password', None)
+
+    user = User.query.filter_by(email=email, password=user_pass).first()
+
+    if user is None:
+        return jsonify({'message': "Invalid credentials"})
+
+    logged_user = User.query.get(user.id)
+    result = user_schema.dump(logged_user)
+
+    new_access_token = create_access_token(identity=email)
+    new_refresh_token = create_refresh_token(identity=email)
+
+    return jsonify(user=result, access_token=new_access_token, refresh_token=new_refresh_token)
+
+
+@app.route('/api/refresh')
+@jwt_required(refresh=True)
+def refresh(self):
+
+    current_user = get_jwt_identity()
+
+    new_access_token = create_access_token(identity=current_user)
+
+    return make_response(jsonify({"access_token": new_access_token}), 200)
+
+
+# Protect a route with jwt_required, which will kick out requests
+# without a valid JWT present.
+@app.route('/api/protected', methods=['GET'])
+@jwt_required()
+def protected_page():
+    # Access the identity of the current user with get_jwt_identity
+    current_user = get_jwt_identity()
+    return jsonify(logged_in_as=current_user), 200
+
+
+@app.route('/api/users')
+def users():
+    all_users = User.query.all()
+    result = users_schema.dump(all_users)
+    # return jsonify({"mesage":"works"})
+    return jsonify(result)
+
+
+@app.route('/api/users/<id>')
+def user_detail(id):
+    user = User.query.get(id)
+    result = user_schema.dump(user)
+    return jsonify(result)
+
+
+@app.route('/api/register', methods=['POST'])
+def user_create():
+
+    email = request.json['email']
+    password = request.json['password']
+    name = request.json['name']
+
+    user = User.query.filter_by(email=email).first()
+
+    if user is None:
+        new_user = User(email=email, password=password, name=name)
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"message": "User created successfully"})
+    return jsonify({'message': "Email already taken"})
+
+
+@app.route('/api/articles')
+def get_articles():
+    all_articles = Article.query.all()
+    result = articles_schema.dump(all_articles)
+    return jsonify(result)
+
+
+@app.route('/api/article/<id>')
+def article_detail(id):
+    article = Article.query.get(id)
+    result = article_schema.dump(article)
+    return jsonify(result)
+
+
+@app.route('/api/article/create', methods=['POST'])
+def create_article():
+    title = request.json['title']
+    body = request.json['body']
+    author = request.json['author']
+
+    new_article = Article(title=title, body=body, author=author)
+    db.session.add(new_article)
+    db.session.commit()
+    return jsonify({"message": "Article created successfully"})
+
+
+@app.route('/api/article/update/<id>', methods=['PUT'])
+def article_update(id):
+    article = Article.query.get(id)
+    title = request.json['title']
+    body = request.json['body']
+    author = request.json['author']
+
+    article.title = title
+    article.body = body
+    article.author = author
+
+    result = article_schema.dump(article)
+
+    db.session.commit()
+    return jsonify(article=result, message='Article Updated successfully')
+
+
+@app.route('/api/article/delete/<id>', methods=['DELETE'])
+def delete_article(id):
+    article = Article.query.get(id)
+
+    db.session.delete(article)
+    db.session.commit()
+    return jsonify({'message': 'Article Delete successfully'})
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+///////////////////////////////////////////////////////////////////////////
+
+REACT FRONTEND
+
+npx create-react-app app_name
+
+React Router needs to be installed seperately as
+npm i -D react-router-dom
+
+We use the Router in App.js file 
+in App.js
+
+import "bootstrap/dist/css/bootstrap.min.css";
+
+import "./App.css";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+
+import Layout from "./componets/Layout";
+import LoginForm from "./componets/LoginForm";
+import RegisterUserForm from "./componets/RegisterUserForm";
+import Users from "./componets/Users";
+import Blogs from "./componets/Blogs";
+import Home from "./componets/Home";
+import CreateArticle from "./componets/CreateArticle";
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Home />} />
+          <Route path="blogs" element={<Blogs />} />
+          <Route path="create_article" element={<CreateArticle />} />
+          <Route path="users" element={<Users />} />
+          <Route path="login" element={<LoginForm />} />
+          <Route path="register" element={<RegisterUserForm />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
+
+////////////////////////////////////////////////////
+
+Then go to the Layout.js to define the Links and Outlet as
+
+in Layout.js
+
+import React from "react";
+import { Outlet } from "react-router-dom";
+import { Button, Container, Nav, Navbar, NavDropdown } from "react-bootstrap";
+
+//after loggging in the user
+import { useAuth, logout } from "../auth_provider";
+
+const LoggedInLinks = () => {
+  return (
+    <>
+      <Navbar.Collapse
+        id="responsive-navbar-nav"
+        className=" justify-content-end"
+      >
+        <Nav>
+          <Nav.Link href="/">Home</Nav.Link>
+          <Nav.Link href="/blogs">Blogs</Nav.Link>
+          <Nav.Link href="/users">Users</Nav.Link>
+          <Nav.Link href="/create_article">Create Post</Nav.Link>
+          <NavDropdown title="Dropdown" id="collasible-nav-dropdown">
+            <NavDropdown.Item href="#action/3.1">Action</NavDropdown.Item>
+            <NavDropdown.Item href="#action/3.2">
+              Another action
+            </NavDropdown.Item>
+            <NavDropdown.Item href="#action/3.3">Something</NavDropdown.Item>
+            <NavDropdown.Divider />
+            <NavDropdown.Item href="#action/3.4">
+              Separated link
+            </NavDropdown.Item>
+          </NavDropdown>
+        </Nav>
+
+        <Nav>
+          <p
+            style={{
+              color: "#ffffff",
+              marginLeft: "40px",
+              paddingTop: "15px",
+              paddingRight: "10px",
+            }}
+          >
+            Username
+          </p>
+          <Nav.Link
+            href="#"
+            onClick={() => {
+              logout();
+            }}
+          >
+            <Button variant="secondary">Logout</Button>
+          </Nav.Link>
+        </Nav>
+      </Navbar.Collapse>
+    </>
+  );
+};
+
+const LoggedOutLinks = () => {
+  return (
+    <>
+      <Navbar.Collapse
+        id="responsive-navbar-nav"
+        className=" justify-content-end"
+      >
+        <Nav>
+          <Nav.Link href="/">Home</Nav.Link>
+          <Nav.Link href="/blogs">Blogs</Nav.Link>
+        </Nav>
+
+        <Nav>
+          <Nav.Link href="/login">
+            <Button variant="outline-light">Login</Button>
+          </Nav.Link>
+          <Nav.Link eventKey={2} href="/register">
+            <Button variant="outline-light">Register</Button>
+          </Nav.Link>
+        </Nav>
+      </Navbar.Collapse>
+    </>
+  );
+};
+function Layout() {
+  const [logged] = useAuth();
+
+  return (
+    <div className="App">
+      <Navbar collapseOnSelect expand="lg" bg="dark" variant="dark">
+        <Container>
+          <Navbar.Brand href="#home">Flask-React Blog</Navbar.Brand>
+          <Navbar.Toggle aria-controls="responsive-navbar-nav" />
+
+          {logged ? <LoggedInLinks /> : <LoggedOutLinks />}
+        </Container>
+      </Navbar>
+
+      <div className="container my-5">
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+
+export default Layout;
+
+
+///////////////////////////////////////////
+
+To use bootstrap in react, run
+npm install react-bootstrap bootstrap
+
+in to App.js add 
+import 'bootstrap/dist/css/bootstrap.min.css'; 
+
+
+Then in the component
+import { Button } from 'react-bootstrap';
+
+react-bootstrap is header
+https://react-bootstrap.github.io/components/alerts
+
+For Form Validation in React we use 
+React Hook Form in 
+https://react-hook-form.com/get-started
+in terminal run
+npm install react-hook-form
+
+Then in the app import it as
+import { useForm } from "react-hook-form
+
+To login from the frontend and get an access token, we will use
+React Token Auth gotten from
+https://github.com/obabichev/react-token-auth
+
+in terminal run
+npm install react-token-auth
+
+after the installtion, we create a Provider.js file in which will handle 
+the auth system 
+
+/////////////////////////////////////////////////////////////////////
+After intsalling react-token-Auth
+create a file called auth_provider.js
+
+in auth_provider.js
+
+import { createAuthProvider } from "react-token-auth";
+
+export const { useAuth, authFetch, login, logout } = createAuthProvider({
+  getAccessToken: (session) => session.access_token,
+  storage: localStorage,
+  onUpdateToken: (token) =>
+    fetch("/update-token", {
+      method: "POST",
+      body: token.refresh_token,
+    }).then((r) => r.json()),
+});
+
+//////////////////////////////////////////////////////////////////////////////////
+
+in Home.js
+
+import React from "react";
+import { useAuth } from "../auth_provider";
+import { useState, useEffect } from "react";
+import Article from "./Article";
+import Button from "react-bootstrap/Button";
+import Form from "react-bootstrap/Form";
+import Modal from "react-bootstrap/Modal";
+import { useForm } from "react-hook-form";
+
+const LoggedInHome = () => {
+  const [articles, setArticles] = useState([]);
+
+  const [showmodal, setShowmodal] = useState(false);
+
+  const [serverResponse, setServerResponse] = useState("");
+
+  const [articleId, setArticleId] = useState(0);
+
+  const [showdelmodal, setShowdelmodal] = useState(false);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/api/articles")
+      .then((resp) => resp.json())
+      .then((data) => {
+        // console.log(data);
+        setArticles(data);
+      })
+      .catch((err) => console.log(err));
+  }, []);
+
+  const getAllArticles = () => {
+    fetch("http://127.0.0.1:5000/api/articles")
+      .then((resp) => resp.json())
+      .then((data) => {
+        // console.log(data);
+        setArticles(data);
+      })
+      .catch((err) => console.log(err));
+  };
+  // react hook form declarations
+  const {
+    register,
+    reset,
+    handleSubmit,
+    setValue, // used to select and set the value you want to update
+    formState: { errors },
+  } = useForm();
+
+  // this is to get the data into our edit form
+  const showModal = (id) => {
+    setShowmodal(true);
+    // console.log("Article " + id);
+
+    setArticleId(id);
+
+    articles.map((article) => {
+      if (article.id == id) {
+        // console.log(article);
+        setValue("author", article.author);
+        setValue("title", article.title);
+        setValue("body", article.body);
+      }
+    });
+  };
+
+  // close modal
+  const closeModal = () => {
+    setShowmodal(false);
+  };
+
+  // this is to update and send the data to the updateapi
+  const updateArticleForm = (data) => {
+    // console.log(data);
+    // console.log(articleId);
+
+    const body = {
+      author: data.author,
+      title: data.title,
+      body: data.body,
+    };
+
+    const requestOptions = {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    };
+
+    fetch(
+      `http://127.0.0.1:5000/api/article/update/${articleId}`,
+      requestOptions
+    )
+      .then((resp) => resp.json())
+      .then((data) => {
+        console.log(data.message);
+        console.log(data.article);
+
+        // setServerResponse(data.message);
+        // // console.log(serverResponse);
+
+        // const new_article = [...articles, data.article];
+        // setArticles(new_article);
+
+        reset();
+        setShowmodal(false);
+        getAllArticles();
+
+        // or to keep it simple we can just reload our page
+        // const reload = window.location.reload();
+      })
+      .catch((err) => console.log(err));
+  };
+
+  const showDeleteModal = (id) => {
+    setShowdelmodal(true);
+    // console.log(id);
+    setArticleId(id);
+  };
+
+  const deleteArticleForm = () => {
+    // console.log("delete");
+    // console.log(articleId);
+
+    const requestOptions = {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    };
+
+    fetch(
+      `http://127.0.0.1:5000/api/article/delete/${articleId}`,
+      requestOptions
+    )
+      .then((resp) => resp.json())
+      .then((data) => {
+        // console.log(data);
+
+        setShowdelmodal(false);
+
+        getAllArticles();
+      })
+      .catch((err) => console.log(err));
+  };
+
+  const closeDelModal = () => {
+    setShowdelmodal(false);
+  };
+
+  return (
+    <div>
+      <Modal show={showmodal} onHide={closeModal} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Modal heading</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleSubmit(updateArticleForm)}>
+          <Modal.Body>
+            <Form.Group className="mb-3">
+              <Form.Label>Author</Form.Label>
+              <Form.Control {...register("author", { required: true })} />
+              {errors.author && (
+                <span style={{ color: "red" }}>
+                  Author is required <br />{" "}
+                </span>
+              )}
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+              <Form.Label>Select Article Category</Form.Label>
+              <Form.Select>
+                <option>Politics</option>
+                <option>Sports</option>
+                <option>Fashion</option>
+                <option>Cars</option>
+              </Form.Select>
+            </Form.Group>
+
+            <Form.Group className="mb-3" controlId="">
+              <Form.Label>Article Title</Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="Article Title"
+                {...register("title", { required: true })}
+              />
+              {errors.title && (
+                <span style={{ color: "red" }}>
+                  Title is required <br />{" "}
+                </span>
+              )}
+            </Form.Group>
+
+            <Form.Group className="mb-3" controlId="">
+              <Form.Label>Body</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={5}
+                placeholder="body"
+                {...register("body", { required: true })}
+              />
+              {errors.body && (
+                <span style={{ color: "red" }}>
+                  Body is required <br />{" "}
+                </span>
+              )}
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={closeModal}>
+              Close
+            </Button>
+            <Button variant="primary" type="submit">
+              Save Changes
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      <Modal show={showdelmodal} onHide={closeDelModal}>
+        <Modal.Header closeButton>
+          <Modal.Title>Modal heading</Modal.Title>
+        </Modal.Header>
+        <Form>
+          <Modal.Body>
+            <h4 className="text-center">
+              Are you sure you want to DELETE this Article?
+            </h4>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={closeDelModal}>
+              Close
+            </Button>
+            <Button variant="danger" onClick={deleteArticleForm}>
+              Delete
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+      <h1>All Posts</h1>
+
+      {articles != "" ? (
+        articles &&
+        articles.map((article, index) => (
+          <Article
+            key={index}
+            title={article.title}
+            body={article.body}
+            author={article.author}
+            date_posted={article.date_posted}
+            onClick={() => showModal(article.id)}
+            onClickDelete={() => showDeleteModal(article.id)}
+          />
+        ))
+      ) : (
+        <h3>loading...</h3>
+      )}
+    </div>
+  );
+};
+
+const LoggedOutHome = () => {
+  return (
+    <div>
+      <h1>Welcome Login to view all posts</h1>
+    </div>
+  );
+};
+
+function Home() {
+  const [logged] = useAuth();
+  return <>{logged ? <LoggedInHome /> : <LoggedOutHome />}</>;
+}
+
+export default Home;
+
+///////////////////////////////////////////////////////////////////////////////
+
+in RegisterUserForm.js
+
+import React, { useState, useEffect } from "react";
+import { Form, Button, Alert } from "react-bootstrap";
+import { Link } from "react-router-dom";
+
+import { useForm } from "react-hook-form";
+
+function RegisterUserForm() {
+
+  // for bootstrap alert
+  const [show, setShow] = useState(false);
+  const [serverResponse, setServerResponse] = useState("");
+
+
+  // Validation
+  const {
+    register,
+    watch,
+    reset,
+    handleSubmit,
+    formState: { errors },
+  } = useForm();
+
+  const submitRegisterForm = (data) => {
+    // console.log(data);
+
+    if (data.password === data.confirm_password) {
+      const body = {
+        name: data.name,
+        email: data.email,
+        password: data.password,
+      };
+
+      const requestOptions = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      };
+
+      // using fetch
+
+      fetch("http://127.0.0.1:5000/api/register", requestOptions)
+        .then((resp) => resp.json())
+        .then((data) => {
+          console.log(data);
+          setServerResponse(data.message);
+          console.log(serverResponse);
+
+          setShow(true);
+
+          setTimeout(() => {
+            setShow(false);
+          }, 5000);
+        })
+        .catch((err) => console.log(err));
+
+      reset();
+    } else {
+      alert("Passwords do not match");
+    }
+
+  };
+
+
+  return (
+    <>
+      <h1 className="bg-dark text-light title_label">Registration Page</h1>
+      <Form onSubmit={handleSubmit(submitRegisterForm)} className="form_box">
+        {show ? (
+          <Alert variant="success" onClose={() => setShow(false)} dismissible>
+            <p>{serverResponse}</p>
+          </Alert>
+        ) : (
+          <></>
+        )}
+
+        <Form.Group className="mb-4" controlId="formBasicName">
+          <Form.Label>Full Name</Form.Label>
+          <Form.Control
+            type="text"
+            placeholder="Enter Name"
+
+            {...register("name", { required: true, maxLength: 50 })}
+          />
+          {errors.name && (
+            <span style={{ color: "red" }}>
+              Name is required <br />{" "}
+            </span>
+          )}
+          {errors.name?.type === "maxLength" && (
+            <span style={{ color: "red" }}>
+              Characters Must be less than 50
+            </span>
+          )}
+        </Form.Group>
+
+        <Form.Group className="mb-4" controlId="formBasicEmail">
+          <Form.Label>Email address</Form.Label>
+          <Form.Control
+            type="email"
+            placeholder="Enter email"
+            {...register("email", { required: true, maxLength: 50 })}
+          />
+          {errors.email && (
+            <span style={{ color: "red" }}>
+              Email is required <br />
+            </span>
+          )}
+          {errors.email?.type === "maxLength" && (
+            <span style={{ color: "red" }}>
+              Characters Must be less than 50
+            </span>
+          )}
+        </Form.Group>
+
+        <Form.Group className="mb-4" controlId="formBasicPassword">
+          <Form.Label>Password</Form.Label>
+          <Form.Control
+            type="password"
+            placeholder="Password"
+            {...register("password", { required: true, minLength: 4 })}
+          />
+          {errors.password && (
+            <span style={{ color: "red" }}>
+              Password is required <br />{" "}
+            </span>
+          )}
+          {errors.password?.type === "minLength" && (
+            <span style={{ color: "red" }}>
+              Characters Must be greater than 4
+            </span>
+          )}
+        </Form.Group>
+        <Form.Group className="mb-4" controlId="formBasicComfirmPassword">
+          <Form.Label>Confirm Password</Form.Label>
+          <Form.Control
+            type="password"
+            placeholder="Confirm Password"
+            {...register("confirm_password", { required: true, minLength: 4 })}
+          />
+          {errors.confirm_password && (
+            <span style={{ color: "red" }}>
+              Confirm Password is required <br />{" "}
+            </span>
+          )}
+          {errors.confirm_password?.type === "minLength" && (
+            <span style={{ color: "red" }}>
+              Characters Must be greater than 4
+            </span>
+          )}
+        </Form.Group>
+
+        <Button variant="dark" type="submit">
+          Submit
+        </Button>
+        <Form.Group className="mt-4">
+          Already have an account? <Link to="/login">Login Here </Link>
+        </Form.Group>
+      </Form>
+    </>
+  );
+}
+
+export default RegisterUserForm;
+
+/////////////////////////////////////////////////////////////////////////////////
+
+in LoginForm.js
+
+import React, { useState } from "react";
+import { Form, Button } from "react-bootstrap";
+import { Link } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { login } from "../auth_provider";
+
+import { useNavigate } from "react-router-dom"; // for redirecting
+
+function LoginForm() {
+  const [user, setUser] = useState({});
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm();
+
+  // useNavigate is used to redirect to another page programmatically
+  let navigate = useNavigate();
+
+  const submitLoginForm = (data) => {
+    // console.log(data);
+    const body = {
+      email: data.email,
+      password: data.password,
+    };
+
+    const requestOptions = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    };
+
+    fetch("http://127.0.0.1:5000/api/login", requestOptions)
+      .then((resp) => resp.json())
+      .then((data) => {
+        console.log(data); // all data object
+        // console.log(data.access_token);  // only access_token
+
+        // this is used to log in with the access token
+        login(data.access_token);
+
+        // this is used to redirect to another page and passing data to the new page
+        navigate("/", {
+          replace: true,
+          state: { user: setUser(data.user) },
+        });
+      })
+      .catch((err) => console.log(err));
+
+    reset();
+  };
+
+  return (
+    <>
+      <h1 className="bg-dark text-light title_label">Login Page</h1>
+
+      <Form onSubmit={handleSubmit(submitLoginForm)} className="form_box">
+        <Form.Group className="mb-4" controlId="formBasicEmail">
+          <Form.Label>Email address</Form.Label>
+          <Form.Control
+            type="email"
+            placeholder="Enter email"
+            {...register("email", { required: true, maxLenght: 50 })}
+          />
+          {errors.email && (
+            <span style={{ color: "red" }}>Email is required</span>
+          )}
+        </Form.Group>
+
+        <Form.Group className="mb-4" controlId="formBasicPassword">
+          <Form.Label>Password</Form.Label>
+          <Form.Control
+            type="password"
+            placeholder="Password"
+            {...register("password", { required: true, minLength: 4 })}
+          />
+          {errors.password && (
+            <span style={{ color: "red" }}>Password is required</span>
+          )}
+        </Form.Group>
+        <Form.Group className="mb-4" controlId="formBasicCheckbox">
+          <Form.Check type="checkbox" label="Check me out" />
+        </Form.Group>
+        <Button variant="dark" type="submit">
+          Submit
+        </Button>
+
+        <Form.Group className="mt-4">
+          Do not have an account? <Link to="/register">Register Here</Link>
+        </Form.Group>
+      </Form>
+    </>
+  );
+}
+
+export default LoginForm;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
+in Users.js
+
+import UserDetail from "./UserDetail";
+import React, { useState, useEffect } from "react";
+
+function Users(props) {
+  const [users, setUsers] = useState([]);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/api/users", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+      .then((resp) => resp.json())
+      .then((data) => {
+        console.log(data);
+        setUsers(data);
+      })
+      .catch((error) => console.log(error.message));
+  }, []);
+
+  return (
+    <>
+      <h1>All Users</h1>
+
+      <div className="row">
+        {users &&
+          users.length > 0 &&
+          users.map((user, index) => <UserDetail key={user.id} users={user} />)}
+      </div>
+    </>
+  );
+}
+
+export default Users;
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+in UserDetail.js
+
+import React from "react";
+import { Card } from "react-bootstrap";
+
+function UserDetail(props) {
+  return (
+    <>
+      <div className="col-lg-4 col-md-6 m-3" key={props.users.id}>
+        <Card style={{ width: "22rem" }}>
+          <Card.Img variant="top" src="holder.js/100px180" />
+          <Card.Body>
+            <Card.Title>Name: {props.users.name}</Card.Title>
+            <Card.Subtitle className="mb-2 text-muted">
+              Email: {props.users.email}
+            </Card.Subtitle>
+            <Card.Subtitle className="mb-2 text-muted">
+              Profession: Software engineer
+            </Card.Subtitle>
+            <Card.Text>
+              Some quick example text to build on the card title and make up the
+              bulk of the card's content.
+            </Card.Text>
+            <Card.Link href="#">View Profile</Card.Link>
+          </Card.Body>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+export default UserDetail;
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+in CreateArticle.js
+
+import React, { useState } from "react";
+import Button from "react-bootstrap/Button";
+import Form from "react-bootstrap/Form";
+
+import { useForm } from "react-hook-form";
+import { useNavigate } from "react-router-dom"; // for redirecting
+
+function CreateArticle() {
+  const [serverResponse, setServerResponse] = useState("");
+  let navigate = useNavigate();
+
+  const {
+    register,
+    reset,
+    handleSubmit,
+    formState: { errors },
+  } = useForm();
+
+  const submitArticleForm = (data) => {
+    // console.log(data);
+
+    // to get the token of the logged in user
+    const token = localStorage.getItem("REACT_TOKEN_AUTH_KEY");
+    // console.log(token);
+
+
+    const requestOptions = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `${JSON.parse(token)}`,
+      },
+      body: JSON.stringify(data),
+    };
+
+    fetch("http://127.0.0.1:5000/api/article/create", requestOptions)
+      .then((resp) => resp.json())
+      .then((data) => {
+        // console.log(data);
+        setServerResponse(data.message);
+        console.log(serverResponse);
+
+        reset();
+
+        navigate("/", {
+          replace: true,
+          state: { serverResponse: setServerResponse(data.serverResponse) },
+        });
+      })
+      .catch((err) => console.log(err));
+  };
+  return (
+    <Form onSubmit={handleSubmit(submitArticleForm)}>
+      <Form.Group className="mb-3">
+        <Form.Label>Author</Form.Label>
+        <Form.Control {...register("author", { required: true })} />
+        {errors.author && (
+          <span style={{ color: "red" }}>
+            Author is required <br />{" "}
+          </span>
+        )}
+      </Form.Group>
+
+      <Form.Group className="mb-3">
+        <Form.Label>Select Article Category</Form.Label>
+        <Form.Select>
+          <option>Politics</option>
+          <option>Sports</option>
+          <option>Fashion</option>
+          <option>Cars</option>
+        </Form.Select>
+      </Form.Group>
+
+      <Form.Group className="mb-3" controlId="">
+        <Form.Label>Article Title</Form.Label>
+        <Form.Control
+          type="text"
+          placeholder="Article Title"
+          {...register("title", { required: true })}
+        />
+        {errors.title && (
+          <span style={{ color: "red" }}>
+            Title is required <br />{" "}
+          </span>
+        )}
+      </Form.Group>
+
+      <Form.Group className="mb-3" controlId="">
+        <Form.Label>Body</Form.Label>
+        <Form.Control
+          as="textarea"
+          rows={5}
+          placeholder="body"
+          {...register("body", { required: true })}
+        />
+        {errors.body && (
+          <span style={{ color: "red" }}>
+            Body is required <br />{" "}
+          </span>
+        )}
+      </Form.Group>
+
+      <Button variant="primary" type="submit">
+        Submit
+      </Button>
+    </Form>
+  );
+}
+
+export default CreateArticle;
+
+////////////////////////////////////////////////////////////////////////////////////////////
+
+in Article.js
+
+import React from "react";
+import { Card, Button, Modal } from "react-bootstrap";
+
+function Article({ title, body, author, date_posted, onClick, onClickDelete }) {
+  return (
+    <Card className="card">
+      {/* <Card.Img variant="top" src="holder.js/100px180" /> */}
+      <Card.Body>
+        <Card.Title>{title}</Card.Title>
+        <Card.Text>{body}</Card.Text>
+        <Card.Subtitle className="mb-2 text-muted">
+          <small>Author: {author} </small>
+          <small>Date: {date_posted} </small>
+        </Card.Subtitle>
+
+        <div className="d-flex justify-content-between" style={{}}>
+          <Button variant="primary">Read...</Button>
+
+          <span>
+            <Button
+              variant="secondary"
+              style={{ marginRight: "20px" }}
+              onClick={onClick}
+            >
+              Update
+            </Button>
+            <Button variant="danger" onClick={onClickDelete}>
+              Delete
+            </Button>
+          </span>
+        </div>
+      </Card.Body>
+    </Card>
+  );
+}
+
+export default Article;
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+in App.css
+
+
+
+.App-header {
+  background-color: #282c34;
+  min-height: 10vh;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(10px + 2vmin);
+  color: white;
+  padding: 0px 50px;
+}
+.nav_bar {
+  margin-right: 50px;
+}
+.nav_bar a {
+  color: #fff;
+  padding: 15px 30px;
+  text-decoration: none;
+}
+.form_box {
+  width: 50rem;
+  margin: auto;
+  border: 1px solid black;
+  padding: 40px;
+  border-radius: 10px;
+}
+.title_label {
+  width: 50rem;
+  margin: auto;
+  padding: 10px 20px;
+  margin-bottom: 10px;
+}
+.card {
+  margin-bottom: 20px;
+}
+
+/////////////////////////////////////////////////////////////////////////////
